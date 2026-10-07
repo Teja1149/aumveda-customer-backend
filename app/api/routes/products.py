@@ -3,304 +3,239 @@ from fastapi import APIRouter, HTTPException
 from app.core.supabase import supabase
 
 
-
 router = APIRouter(
-
     prefix="/products",
-
     tags=["Products"]
-
 )
 
 
-
-
-
 # ============================================================
-# GET ALL PRODUCTS
+# GET ALL ACTIVE PRODUCTS
 # ============================================================
-
 
 @router.get("")
 def get_products():
 
-
     try:
 
-
         response = (
-
             supabase
-
             .table("products")
-
             .select(
                 """
-                *,
+                id,
+                vendor_id,
+                category_id,
+                name,
+                slug,
+                short_description,
+                description,
+                status,
+                is_featured,
+                average_rating,
+                review_count,
                 product_images(
                     image_url,
+                    alt_text,
+                    sort_order,
                     is_primary
                 ),
                 product_variants(
+                    id,
+                    name,
                     price,
                     compare_at_price,
+                    stock_quantity,
                     is_default,
                     is_active
                 )
                 """
             )
-
-            .eq(
-                "status",
-                "active"
-            )
-
+            .eq("status", "active")
             .execute()
-
         )
 
-
-
-        products=[]
-
-
+        products = []
 
         for product in response.data:
 
+            # ------------------------------------------------
+            # PRIMARY IMAGE
+            # ------------------------------------------------
 
+            images = product.get("product_images") or []
 
-            # -------------------------
-            # IMAGE
-            # -------------------------
-
-            image_url=None
-
-
-            images = product.get(
-                "product_images",
-                []
+            images = sorted(
+                images,
+                key=lambda image: (
+                    not image.get("is_primary", False),
+                    image.get("sort_order") or 9999
+                )
             )
 
+            image_url = None
 
-            for image in images:
-
-
-                if image.get(
-                    "is_primary"
-                ):
+            if images:
+                image_url = images[0].get("image_url")
 
 
-                    image_url = image.get(
-                        "image_url"
-                    )
+            # ------------------------------------------------
+            # DEFAULT ACTIVE VARIANT
+            # ------------------------------------------------
 
-                    break
+            variants = product.get("product_variants") or []
 
+            active_variants = [
+                variant
+                for variant in variants
+                if variant.get("is_active", False)
+            ]
 
-
-
-
-            # -------------------------
-            # DEFAULT VARIANT PRICE
-            # -------------------------
-
-            price=None
-
-            compare_price=None
-
-
-
-            variants = product.get(
-                "product_variants",
-                []
+            default_variant = next(
+                (
+                    variant
+                    for variant in active_variants
+                    if variant.get("is_default", False)
+                ),
+                None
             )
 
+            if default_variant is None and active_variants:
+                default_variant = active_variants[0]
 
 
-            for variant in variants:
+            price = None
+            compare_at_price = None
+            stock_quantity = 0
+            variant_id = None
+            variant_name = None
 
 
-                if (
+            if default_variant:
 
-                    variant.get(
-                        "is_default"
-                    )
+                variant_id = default_variant.get("id")
 
-                    and
+                variant_name = default_variant.get("name")
 
-                    variant.get(
-                        "is_active"
-                    )
+                price = default_variant.get("price")
 
-                ):
+                compare_at_price = default_variant.get(
+                    "compare_at_price"
+                )
 
-
-                    price = variant.get(
-                        "price"
-                    )
-
-
-                    compare_price = variant.get(
-                        "compare_at_price"
-                    )
-
-
-                    break
-
-
-
-
-
-            products.append({
-
-
-                "id":
-                product.get("id"),
-
-
-                "name":
-                product.get("name"),
-
-
-                "slug":
-                product.get("slug"),
-
-
-
-                "description":
-                product.get("description"),
-
-
-
-                "short_description":
-                product.get(
-                    "short_description"
-                ),
-
-
-
-                "image":
-                image_url,
-
-
-
-                "price":
-                price,
-
-
-
-                "compare_at_price":
-                compare_price,
-
-
-
-                "rating":
-                product.get(
-                    "average_rating"
-                ),
-
-
-
-                "review_count":
-                product.get(
-                    "review_count"
+                stock_quantity = (
+                    default_variant.get("stock_quantity") or 0
                 )
 
 
-            })
+            # ------------------------------------------------
+            # FINAL FRONTEND RESPONSE
+            # ------------------------------------------------
 
+            products.append({
+
+                "id": product.get("id"),
+
+                "vendor_id": product.get("vendor_id"),
+
+                "category_id": product.get("category_id"),
+
+                "name": product.get("name"),
+
+                "slug": product.get("slug"),
+
+                "short_description":
+                    product.get("short_description"),
+
+                "description":
+                    product.get("description"),
+
+                "image": image_url,
+
+                "price": price,
+
+                "compare_at_price":
+                    compare_at_price,
+
+                "rating":
+                    product.get("average_rating"),
+
+                "review_count":
+                    product.get("review_count"),
+
+                "is_featured":
+                    product.get("is_featured", False),
+
+                "variant_id":
+                    variant_id,
+
+                "variant_name":
+                    variant_name,
+
+                "stock_quantity":
+                    stock_quantity,
+
+                "in_stock":
+                    stock_quantity > 0
+
+            })
 
 
         return products
 
 
-
-
-
     except Exception as error:
 
-
         raise HTTPException(
-
             status_code=500,
-
             detail=str(error)
-
         )
-
-
-
-
-
-
 
 
 # ============================================================
 # GET CATEGORIES
 # ============================================================
 
-
 @router.get("/categories")
 def get_categories():
 
-
     try:
 
-
         response = (
-
             supabase
-
             .table("categories")
-
-            .select("*")
-
+            .select(
+                "id,name,parent_id"
+            )
+            .order(
+                "name"
+            )
             .execute()
-
         )
-
 
         return response.data
 
 
-
     except Exception as error:
 
-
         raise HTTPException(
-
             status_code=500,
-
             detail=str(error)
-
         )
-
-
-
-
-
 
 
 # ============================================================
 # GET PRODUCT BY SLUG
 # ============================================================
 
-
 @router.get("/{slug}")
-def get_product_by_slug(
-    slug:str
-):
-
+def get_product_by_slug(slug: str):
 
     try:
 
-
-        response=(
-
+        response = (
             supabase
-
             .table("products")
-
             .select(
                 """
                 *,
@@ -308,30 +243,32 @@ def get_product_by_slug(
                 product_variants(*)
                 """
             )
-
             .eq(
                 "slug",
                 slug
             )
-
             .single()
-
             .execute()
-
         )
 
+        if not response.data:
+
+            raise HTTPException(
+                status_code=404,
+                detail="Product not found"
+            )
 
         return response.data
 
 
+    except HTTPException:
 
-    except Exception as error:
+        raise
 
+
+    except Exception:
 
         raise HTTPException(
-
             status_code=404,
-
             detail="Product not found"
-
         )
